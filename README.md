@@ -32,7 +32,8 @@ Instead of training a model on a limited dataset, we built a flexible expert sys
 * **Tracking:** A custom Centroid Tracker for object permanence across frames.
 * **Behavioral Analysis:** Google's MediaPipe Pose for human keypoint detection and our custom logic for velocity and loitering analysis.
 
-![Screenshot of the PRS Dashboard in Action](link_to_your_screenshot.jpg)
+![Screenshot of the PRS Dashboard in Action](GITEG
+.jpg)
 
 ---
 
