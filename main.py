@@ -4,6 +4,7 @@ import cv2
 import torch
 import mediapipe as mp
 import numpy as np
+import requests
 from tracker import CentroidTracker
 from scipy.spatial import distance as dist
 from datetime import datetime
@@ -19,10 +20,9 @@ print("Loading models and setting up...")
 # 1. YOLOv5 Model
 model = torch.hub.load('yolov5', 'yolov5s', source='local', pretrained=True)
 model.classes = [0, 24, 26, 28] # person, backpack, handbag, suitcase
-model.conf = 0.25
+model.conf = 0.4
 
 # 2. MediaPipe Pose Model
-# ### THE FIX IS HERE ###
 # static_image_mode=True tells MediaPipe to treat each image independently, preventing timestamp errors.
 mp_pose = mp.solutions.pose
 pose = mp_pose.Pose(static_image_mode=True, min_detection_confidence=0.5, min_tracking_confidence=0.5)
@@ -34,9 +34,11 @@ ct = CentroidTracker(maxDisappeared=40)
 # --- DATA STRUCTURES ---
 object_info = {} 
 alerts = []
+sent_alerts = set() # To track which alerts have been sent to Discord
 flow_vectors = deque(maxlen=100) # For wrong direction detection
 
 # --- CONSTANTS (TUNE THESE VALUES) ---
+DISCORD_WEBHOOK_URL = "https://discordapp.com/api/webhooks/1409070598759518238/AMaSBr8jPxdItsQkfd0OFK6r_216TLgk4S4LCMkLdzvTJouSkJU_r6wQWiVdBGNK31SO"
 POSSESSION_THRESHOLD = 150 
 CROUCH_FRAMES_THRESHOLD = 10
 ABANDON_FRAMES_THRESHOLD = 100
@@ -48,8 +50,19 @@ LOITER_DISTANCE_THRESHOLD = 50
 # --- VIDEO SETUP ---
 VIDEO_PATH = 'official_videos/test_02_fixed.mp4' 
 
+def reset_engine_states():
+    """Clears all the stateful variables for a new video run."""
+    global object_info, alerts, sent_alerts, flow_vectors, ct
+    object_info.clear()
+    alerts.clear()
+    sent_alerts.clear()
+    flow_vectors.clear()
+    # Re-initialize the CentroidTracker to reset its internal state
+    ct = CentroidTracker(maxDisappeared=40)
+
+
 def process_frame(frame):
-    global object_info, alerts, flow_vectors
+    global object_info, alerts, flow_vectors, sent_alerts
 
     # --- DETECTION & TRACKING ---
     results = model(frame)
@@ -100,26 +113,22 @@ def process_frame(frame):
 
     # --- BEHAVIORAL ANALYSIS ---
     dominant_flow = (0,0)
-    if len(flow_vectors) > 20: # Need enough samples to be confident
+    if len(flow_vectors) > 20:
         dominant_flow = np.mean(flow_vectors, axis=0)
 
     for person_id, person_data in persons.items():
-        # Reset state if it's a transient one
         if person_data['state'] in ['running', 'wrong_direction']:
             person_data['state'] = 'normal'
 
-        # Pose Estimation
         if 'box' not in person_data: continue
         p_box = person_data['box']
         person_crop = frame[p_box[1]:p_box[3], p_box[0]:p_box[2]]
         if person_crop.size == 0: continue
         
-        # Make frame non-writeable to pass by reference for performance
         person_crop.flags.writeable = False
         person_crop_rgb = cv2.cvtColor(person_crop, cv2.COLOR_BGR2RGB)
         pose_results = pose.process(person_crop_rgb)
         person_crop.flags.writeable = True
-
 
         if pose_results.pose_landmarks:
             landmarks_to_draw = pose_results.pose_landmarks
@@ -135,7 +144,6 @@ def process_frame(frame):
             else:
                  person_data['timers']['crouch'] = max(0, person_data['timers']['crouch'] - 1)
         
-        # Loitering Detection
         positions = person_data['positions']
         if len(positions) == 20:
             max_dist = dist.pdist(np.array(positions)).max()
@@ -144,16 +152,14 @@ def process_frame(frame):
             else:
                 person_data['timers']['loiter'] = 0
         
-        # Running Detection
         if person_data['velocity'] > RUNNING_VELOCITY_THRESHOLD:
             person_data['state'] = 'running'
         
-        # Wrong Direction Detection
         if len(person_data['positions']) > 10 and np.linalg.norm(dominant_flow) > 0.5:
             person_vector = (person_data['positions'][-1][0] - person_data['positions'][0][0], person_data['positions'][-1][1] - person_data['positions'][0][1])
-            if np.linalg.norm(person_vector) > 1: # Only check if person is moving
+            if np.linalg.norm(person_vector) > 1:
                 cos_similarity = np.dot(person_vector, dominant_flow) / (np.linalg.norm(person_vector) * np.linalg.norm(dominant_flow))
-                if cos_similarity < -0.5: # Moving against the flow
+                if cos_similarity < -0.5:
                     person_data['timers']['wrong_dir'] += 1
                 else:
                     person_data['timers']['wrong_dir'] = 0
@@ -248,5 +254,24 @@ def process_frame(frame):
             if data['class'] in ['backpack', 'handbag', 'suitcase'] and data['debug_dist'] != -1:
                 debug_text += f" D: {data['debug_dist']:.0f}"
             cv2.putText(frame, debug_text, (centroid[0] - 20, centroid[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+    # --- CENTRALIZED DISCORD ALERT LOGIC ---
+    if len(alerts) > 0 and alerts[-1] not in sent_alerts:
+        new_alert = alerts[-1]
+        sent_alerts.add(new_alert)
+
+        if "CRITICAL" in new_alert:
+            message_header = "🚨 **CRITICAL ALERT** 🚨"
+        elif "HIGH" in new_alert:
+            message_header = "⚠️ **HIGH ALERT** ⚠️"
+        else:
+            message_header = "ℹ️ INFO ℹ️"
+
+        if DISCORD_WEBHOOK_URL != "YOUR_WEBHOOK_URL_HERE":
+            payload = { "content": f"{message_header}\n**Details:** {new_alert}" }
+            try:
+                requests.post(DISCORD_WEBHOOK_URL, json=payload)
+            except Exception as e:
+                print(f"Error sending Discord alert: {e}")
 
     return frame, alerts, current_possessions
