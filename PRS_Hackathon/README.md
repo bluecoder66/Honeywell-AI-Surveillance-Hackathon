@@ -10,7 +10,7 @@ Traditional surveillance systems are reactive; they detect events that have alre
 
 Instead of training a model on a limited dataset, we built a flexible expert system that understands universal behavioral primitives (like crouching, loitering, and suspicious throws). This provides **Explainable AI (XAI)**, a critical feature for real-world security operations.
 
-**[https://www.youtube.com/watch?v=fvno-tioB4k]**
+**[Link to Your 2-Minute Demo Video Here]**
 
 ---
 
@@ -32,7 +32,7 @@ Instead of training a model on a limited dataset, we built a flexible expert sys
 * **Tracking:** A custom Centroid Tracker for object permanence across frames.
 * **Behavioral Analysis:** Google's MediaPipe Pose for human keypoint detection and our custom logic for velocity and loitering analysis.
 
-![Screenshot of the PRS Dashboard in Action](official_screenshot.png)
+![Screenshot of the PRS Dashboard in Action](link_to_your_screenshot.jpg)
 
 ---
 

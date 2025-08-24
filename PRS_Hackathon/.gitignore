@@ -1,0 +1,14 @@
+# Ignore the Python virtual environment
+venv/
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+
+# Ignore large video files
+*.mp4
+*.avi
+
+# Ignore other large files
+*.pt
+*.exe
